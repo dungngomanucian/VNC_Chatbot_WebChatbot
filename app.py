@@ -87,6 +87,10 @@ def load_model():
         
         if hasattr(model, 'generation_config'):
             model.generation_config.max_length = None
+            model.generation_config.max_new_tokens = 256
+            model.generation_config.temperature = 0.7
+            model.generation_config.top_p = 0.9
+            model.generation_config.repetition_penalty = 1.15
         
         pipe = pipeline(
             "text-generation",
@@ -108,27 +112,43 @@ def generate_response(message, history):
     
     try:
         if tokenizer.chat_template is not None:
-            messages = [{"role": "user", "content": message}]
+            messages = []
+            
+            if history and len(history) > 0:
+                for user_msg, assistant_msg in history[-3:]:
+                    messages.append({"role": "user", "content": user_msg})
+                    messages.append({"role": "assistant", "content": assistant_msg})
+            
+            messages.append({"role": "user", "content": message})
+            
             prompt = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
         else:
-            prompt = f"Question: {message}\nAnswer: "
+            context = ""
+            if history and len(history) > 0:
+                context_parts = []
+                for user_msg, assistant_msg in history[-2:]:
+                    context_parts.append(f"Q: {user_msg}\nA: {assistant_msg}")
+                context = "\n\n".join(context_parts) + "\n\n"
+            prompt = f"{context}Question: {message}\nAnswer: "
         
         with torch.inference_mode():
             outputs = pipe(
                 prompt,
-                max_new_tokens=64,
+                max_new_tokens=256,
                 max_length=None,
-                temperature=0.2,
-                top_p=0.95,
-                do_sample=False,
-                repetition_penalty=1.1,
+                temperature=0.7,
+                top_p=0.9,
+                top_k=50,
+                do_sample=True,
+                repetition_penalty=1.15,
                 return_full_text=False,
                 num_return_sequences=1,
-                pad_token_id=tokenizer.eos_token_id
+                pad_token_id=tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id
             )
         
         response = outputs[0]['generated_text'].strip()
@@ -136,35 +156,44 @@ def generate_response(message, history):
         stop_phrases = [
             "\n\n\n",
             "\nQuestion:",
+            "\nQ:",
             "\nUser:",
             "<|endoftext|>",
             "\n\nAnswer:",
-            "\n\nQuestion:"
+            "\n\nA:",
+            "\n\nQuestion:",
+            tokenizer.eos_token if tokenizer.eos_token else None
         ]
+        
+        stop_phrases = [s for s in stop_phrases if s]
         
         for stop_phrase in stop_phrases:
             if stop_phrase in response:
                 response = response.split(stop_phrase)[0]
                 break
         
-        lines = [line.strip() for line in response.split('\n') if line.strip()]
-        if lines:
-            cleaned_response = lines[0]
-            if len(cleaned_response) < 10 and len(lines) > 1:
-                cleaned_response = lines[0] + " " + lines[1]
-        else:
-            cleaned_response = response
+        response = response.strip()
         
-        sentences = cleaned_response.split('.')
-        if len(sentences) > 3:
-            cleaned_response = '.'.join(sentences[:3]) + '.'
-        elif len(sentences) > 1 and len('.'.join(sentences[:2])) < 200:
-            cleaned_response = '.'.join(sentences[:2]) + '.'
+        if not response:
+            return "Xin lỗi, tôi không thể tạo câu trả lời. Vui lòng thử lại."
         
-        if len(cleaned_response) > 300:
-            cleaned_response = cleaned_response[:300].rsplit('.', 1)[0] + '.'
+        if len(response) < 5:
+            return response
         
-        return cleaned_response.strip()
+        if response.endswith(('.', '!', '?')):
+            return response
+        
+        sentences = response.split('.')
+        if len(sentences) > 1:
+            last_sentence = sentences[-1].strip()
+            if len(last_sentence) < 10:
+                response = '.'.join(sentences[:-1]) + '.'
+            else:
+                response = '.'.join(sentences) + '.'
+        elif not response.endswith('.'):
+            response += '.'
+        
+        return response.strip()
         
     except Exception as e:
         return f"Lỗi khi sinh câu trả lời: {str(e)}"
@@ -178,8 +207,7 @@ def chat_interface(message, history):
 
     response = generate_response(message, history)
 
-    history.append({"role": "user", "content": message})
-    history.append({"role": "assistant", "content": response})
+    history.append((message, response))
 
     return history, ""
 
