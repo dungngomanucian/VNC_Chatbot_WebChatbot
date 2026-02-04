@@ -1,36 +1,44 @@
-# Yêu cầu hệ thống
-- Python 3.8 trở lên
-- RAM: Tối thiểu 8GB (khuyến nghị 16GB+)
-- GPU: Tùy chọn (có GPU sẽ nhanh hơn)
-- Disk: Ít nhất 10GB trống để tải model
+---
+title: LLAMA Chatbot
+emoji: 🤖
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+sdk_version: 4.0.0
+app_file: app.py
+pinned: false
+license: mit
+---
 
-# Tạo và kích hoạt môi trường ảo
-# Windows
-py -3.11 -m venv venv
-venv\Scripts\activate
-# Linux/Mac
-python3 -m venv venv
-source venv/bin/activate
+# 🤖 LLAMA Chatbot
 
-# Cài đặt dependencies
-pip install -r requirements.txt
+Ứng dụng chatbot sử dụng mô hình LLAMA để trả lời câu hỏi của người dùng.
 
-# Cấu hình Model
-3. Tạo file `.env` trong thư mục gốc của project và thêm token:
-HUGGINGFACE_TOKEN=your_token_here
+## Tính năng
 
-# Chạy ứng dụng:
-1. python app.py
+- ✅ Sử dụng mô hình LLAMA 3.2 1B Instruct
+- ✅ Giao diện chat thân thiện với Gradio
+- ✅ Tự động tải model khi khởi động
+- ✅ Tối ưu tốc độ với quantization và compilation
+- ✅ Hỗ trợ GPU và CPU
 
-3. Nhấn nút "Load Model" để tải model (chỉ cần làm một lần)
+## Cách sử dụng
 
-4. Nhập câu hỏi và nhấn Enter hoặc nút "Gửi"
+1. Nhập câu hỏi của bạn vào ô chat
+2. Nhấn Enter hoặc nút "Gửi" để nhận câu trả lời
 
-## ⚙️ Tùy chỉnh
+## Cấu hình
 
-Có thể chỉnh sửa các tham số trong `config.py`:
+Để thay đổi model, set biến môi trường `MODEL_NAME` trong Settings của Space.
 
-- `MAX_NEW_TOKENS`: Số token tối đa cho câu trả lời
-- `TEMPERATURE`: Độ sáng tạo (0.0-1.0)
-- `TOP_P`: Nucleus sampling
-- `REPETITION_PENALTY`: Hệ số phạt lặp lại
+Mặc định: `meta-llama/Llama-3.2-1B-Instruct`
+
+## Yêu cầu
+
+- Python 3.8+
+- GPU được khuyến nghị để có tốc độ tốt nhất
+- Hugging Face token (nếu model yêu cầu)
+
+## License
+
+MIT

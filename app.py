@@ -2,7 +2,7 @@ import gradio as gr
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import warnings
-from config import MODEL_NAME_HF, HF_TOKEN
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -12,7 +12,9 @@ try:
 except ImportError:
     HAS_BITSANDBYTES = False
 
-MODEL_NAME = MODEL_NAME_HF
+MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-1B-Instruct")
+HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_QUANTIZATION = DEVICE == "cuda" and HAS_BITSANDBYTES
 USE_COMPILE = DEVICE == "cuda" and hasattr(torch, 'compile')
@@ -24,88 +26,85 @@ pipe = None
 def load_model():
     global model, tokenizer, pipe
     
-    if model is None or tokenizer is None:
-        print(f"Đang tải model {MODEL_NAME}...")
-        print(f"Sử dụng device: {DEVICE}")
-        
-        try:
-            tokenizer_kwargs = {"trust_remote_code": True}
-            if HF_TOKEN:
-                tokenizer_kwargs["token"] = HF_TOKEN
-                print("Đang sử dụng Hugging Face token từ file .env")
-            
-            tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, **tokenizer_kwargs)
-            
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            
-            model_kwargs = {
-                "trust_remote_code": True,
-                "low_cpu_mem_usage": True
-            }
-            
-            if USE_QUANTIZATION:
-                try:
-                    quantization_config = BitsAndBytesConfig(
-                        load_in_8bit=True,
-                        llm_int8_threshold=6.0
-                    )
-                    model_kwargs["quantization_config"] = quantization_config
-                    model_kwargs["device_map"] = "auto"
-                    print("✅ Sử dụng 8-bit quantization để tăng tốc độ")
-                except Exception as e:
-                    print(f"⚠️ Không thể sử dụng quantization: {e}")
-                    model_kwargs["dtype"] = torch.float16
-                    model_kwargs["device_map"] = "auto"
-            else:
-                if DEVICE == "cuda":
-                    model_kwargs["dtype"] = torch.float16
-                    model_kwargs["device_map"] = "auto"
-                else:
-                    model_kwargs["dtype"] = torch.float32
-                    model_kwargs["device_map"] = None
-            
-            if HF_TOKEN:
-                model_kwargs["token"] = HF_TOKEN
-            
-            model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **model_kwargs)
-            
-            if DEVICE == "cpu":
-                model = model.to(DEVICE)
-            
-            model.eval()
-            
-            if USE_COMPILE and not USE_QUANTIZATION:
-                try:
-                    model = torch.compile(model, mode="reduce-overhead")
-                    print("✅ Đã compile model để tối ưu tốc độ")
-                except Exception as e:
-                    print(f"⚠️ Không thể compile model: {e}")
-            
-            if hasattr(model, 'generation_config'):
-                model.generation_config.max_length = None
-            
-            pipe = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                device=0 if DEVICE == "cuda" else -1
-            )
-            
-            print("Model đã được tải thành công!")
-            return "Model đã được tải thành công!"
-        except Exception as e:
-            error_msg = f"Lỗi khi tải model: {str(e)}"
-            print(error_msg)
-            return error_msg
+    if model is not None and tokenizer is not None:
+        return
     
-    return "Model đã được tải sẵn!"
+    print(f"Đang tải model {MODEL_NAME}...")
+    print(f"Sử dụng device: {DEVICE}")
+    
+    try:
+        tokenizer_kwargs = {"trust_remote_code": True}
+        if HF_TOKEN:
+            tokenizer_kwargs["token"] = HF_TOKEN
+        
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, **tokenizer_kwargs)
+        
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
+        model_kwargs = {
+            "trust_remote_code": True,
+            "low_cpu_mem_usage": True
+        }
+        
+        if USE_QUANTIZATION:
+            try:
+                quantization_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                    llm_int8_threshold=6.0
+                )
+                model_kwargs["quantization_config"] = quantization_config
+                model_kwargs["device_map"] = "auto"
+                print("✅ Sử dụng 8-bit quantization")
+            except Exception as e:
+                print(f"⚠️ Không thể sử dụng quantization: {e}")
+                model_kwargs["dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+        else:
+            if DEVICE == "cuda":
+                model_kwargs["dtype"] = torch.float16
+                model_kwargs["device_map"] = "auto"
+            else:
+                model_kwargs["dtype"] = torch.float32
+                model_kwargs["device_map"] = None
+        
+        if HF_TOKEN:
+            model_kwargs["token"] = HF_TOKEN
+        
+        model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, **model_kwargs)
+        
+        if DEVICE == "cpu":
+            model = model.to(DEVICE)
+        
+        model.eval()
+        
+        if USE_COMPILE and not USE_QUANTIZATION:
+            try:
+                model = torch.compile(model, mode="reduce-overhead")
+                print("✅ Đã compile model")
+            except Exception as e:
+                print(f"⚠️ Không thể compile model: {e}")
+        
+        if hasattr(model, 'generation_config'):
+            model.generation_config.max_length = None
+        
+        pipe = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            device=0 if DEVICE == "cuda" else -1
+        )
+        
+        print("✅ Model đã được tải thành công!")
+    except Exception as e:
+        print(f"❌ Lỗi khi tải model: {str(e)}")
+        raise
 
 def generate_response(message, history):
     global model, tokenizer, pipe
     
     if model is None or tokenizer is None:
-        return "Vui lòng load model trước!"
+        return "Đang tải model, vui lòng đợi..."
     
     try:
         if tokenizer.chat_template is not None:
@@ -184,6 +183,8 @@ def chat_interface(message, history):
 
     return history, ""
 
+load_model()
+
 with gr.Blocks(title="LLAMA Chatbot", theme=gr.themes.Soft()) as demo:
     gr.Markdown(
         """
@@ -191,17 +192,10 @@ with gr.Blocks(title="LLAMA Chatbot", theme=gr.themes.Soft()) as demo:
         Ứng dụng chatbot sử dụng mô hình LLAMA để trả lời câu hỏi của bạn.
         
         **Hướng dẫn sử dụng:**
-        1. Nhấn nút "Load Model" để tải mô hình LLAMA (chỉ cần làm một lần)
-        2. Nhập câu hỏi của bạn vào ô chat
-        3. Nhấn Enter hoặc nút "Gửi" để nhận câu trả lời
+        - Nhập câu hỏi của bạn vào ô chat
+        - Nhấn Enter hoặc nút "Gửi" để nhận câu trả lời
         """
     )
-    
-    with gr.Row():
-        load_btn = gr.Button("Load Model", variant="primary", size="lg")
-        status = gr.Textbox(label="Trạng thái", interactive=False)
-    
-    load_btn.click(fn=load_model, outputs=status)
     
     chatbot = gr.Chatbot(label="Chat", height=500)
     
@@ -221,18 +215,10 @@ with gr.Blocks(title="LLAMA Chatbot", theme=gr.themes.Soft()) as demo:
         """
         ---
         **Lưu ý:** 
-        - Lần đầu tiên load model có thể mất vài phút để tải về
-        - Model sẽ được cache và không cần tải lại lần sau
-        - Đảm bảo bạn có đủ RAM/VRAM để chạy model
+        - Model đã được tải sẵn và sẵn sàng sử dụng
+        - Câu trả lời được tối ưu để ngắn gọn và chính xác
         """
     )
 
 if __name__ == "__main__":
-    print("Đang khởi động ứng dụng...")
-    print(f"Device: {DEVICE}")
-    demo.launch(
-        server_name="localhost",
-        server_port=7860,
-        share=False,
-        show_error=True
-    )
+    demo.launch()
