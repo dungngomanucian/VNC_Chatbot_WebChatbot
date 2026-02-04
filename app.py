@@ -12,8 +12,8 @@ try:
 except ImportError:
     HAS_BITSANDBYTES = False
 
-MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Llama-3.2-1B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
+MODEL_NAME = os.getenv("MODEL_NAME")
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 USE_QUANTIZATION = DEVICE == "cuda" and HAS_BITSANDBYTES
@@ -87,16 +87,18 @@ def load_model():
         
         if hasattr(model, 'generation_config'):
             model.generation_config.max_length = None
-            model.generation_config.max_new_tokens = 256
-            model.generation_config.temperature = 0.7
-            model.generation_config.top_p = 0.9
-            model.generation_config.repetition_penalty = 1.15
+            model.generation_config.max_new_tokens = 200
+            model.generation_config.temperature = 0.5
+            model.generation_config.top_p = 0.95
+            model.generation_config.repetition_penalty = 1.1
         
         pipe = pipeline(
             "text-generation",
             model=model,
             tokenizer=tokenizer,
-            device=0 if DEVICE == "cuda" else -1
+            device=0 if DEVICE == "cuda" else -1,
+            batch_size=1,
+            model_kwargs={"use_cache": True}
         )
         
         print("✅ Model đã được tải thành công!")
@@ -115,7 +117,7 @@ def generate_response(message, history):
             messages = []
             
             if history and len(history) > 0:
-                for user_msg, assistant_msg in history[-3:]:
+                for user_msg, assistant_msg in history[-2:]:
                     messages.append({"role": "user", "content": user_msg})
                     messages.append({"role": "assistant", "content": assistant_msg})
             
@@ -129,22 +131,19 @@ def generate_response(message, history):
         else:
             context = ""
             if history and len(history) > 0:
-                context_parts = []
-                for user_msg, assistant_msg in history[-2:]:
-                    context_parts.append(f"Q: {user_msg}\nA: {assistant_msg}")
-                context = "\n\n".join(context_parts) + "\n\n"
+                user_msg, assistant_msg = history[-1]
+                context = f"Q: {user_msg}\nA: {assistant_msg}\n\n"
             prompt = f"{context}Question: {message}\nAnswer: "
         
         with torch.inference_mode():
             outputs = pipe(
                 prompt,
-                max_new_tokens=256,
+                max_new_tokens=200,
                 max_length=None,
-                temperature=0.7,
-                top_p=0.9,
-                top_k=50,
-                do_sample=True,
-                repetition_penalty=1.15,
+                temperature=0.5,
+                top_p=0.95,
+                do_sample=False,
+                repetition_penalty=1.1,
                 return_full_text=False,
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
