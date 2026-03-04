@@ -3,6 +3,8 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import warnings
 import os
+from dotenv import load_dotenv
+import time 
 
 warnings.filterwarnings("ignore")
 
@@ -12,6 +14,7 @@ try:
 except ImportError:
     HAS_BITSANDBYTES = False
 
+load_dotenv() 
 MODEL_NAME = os.getenv("MODEL_NAME")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
@@ -110,17 +113,13 @@ def generate_response(message, history):
     global model, tokenizer, pipe
     
     if model is None or tokenizer is None:
-        return "Đang tải model, vui lòng đợi..."
+        return "Đang tải model, vui lòng đợi...", 0
+    
+    start_time = time.time()
     
     try:
         if tokenizer.chat_template is not None:
-            messages = []
-            
-            if history and len(history) > 0:
-                for user_msg, assistant_msg in history[-2:]:
-                    messages.append({"role": "user", "content": user_msg})
-                    messages.append({"role": "assistant", "content": assistant_msg})
-            
+            messages = history[-4:] if history else [] 
             messages.append({"role": "user", "content": message})
             
             prompt = tokenizer.apply_chat_template(
@@ -130,9 +129,10 @@ def generate_response(message, history):
             )
         else:
             context = ""
-            if history and len(history) > 0:
-                user_msg, assistant_msg = history[-1]
-                context = f"Q: {user_msg}\nA: {assistant_msg}\n\n"
+            if history and len(history) >= 2:
+                last_user = history[-2]["content"]
+                last_bot = history[-1]["content"]
+                context = f"Q: {last_user}\nA: {last_bot}\n\n"
             prompt = f"{context}Question: {message}\nAnswer: "
         
         with torch.inference_mode():
@@ -174,13 +174,13 @@ def generate_response(message, history):
         response = response.strip()
         
         if not response:
-            return "Xin lỗi, tôi không thể tạo câu trả lời. Vui lòng thử lại."
+            return "Xin lỗi, tôi không thể tạo câu trả lời. Vui lòng thử lại.", 0
         
         if len(response) < 5:
-            return response
+            return response, 0
         
         if response.endswith(('.', '!', '?')):
-            return response
+            return response, 0
         
         sentences = response.split('.')
         if len(sentences) > 1:
@@ -191,11 +191,14 @@ def generate_response(message, history):
                 response = '.'.join(sentences) + '.'
         elif not response.endswith('.'):
             response += '.'
+
+        end_time = time.time()
+        duration = end_time - start_time
         
-        return response.strip()
+        return response.strip(), duration
         
     except Exception as e:
-        return f"Lỗi khi sinh câu trả lời: {str(e)}"
+        return f"Lỗi khi sinh câu trả lời: {str(e)}", 0
 
 def chat_interface(message, history):
     if not message:
@@ -204,9 +207,11 @@ def chat_interface(message, history):
     if history is None:
         history = []
 
-    response = generate_response(message, history)
+    bot_message, duration = generate_response(message, history)
+    time_display = f"\n\n--- \n*⏱️ Thời gian tạo: {duration:.2f} giây*"
 
-    history.append((message, response))
+    history.append({"role": "user", "content": message})
+    history.append({"role": "assistant", "content": bot_message + time_display})
 
     return history, ""
 
